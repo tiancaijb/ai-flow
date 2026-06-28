@@ -7,8 +7,8 @@ editors, rich parameter panels, 800+ integrations. They're great for people. But
 when an AI agent tries to build a workflow on top of them, the debugging loop is
 painful: guess parameters → create workflow → run → decode error → delete → retry.
 
-**ai-flow** does only what's needed: define your pipeline in YAML, run one command.
-No web UI. No drag-and-drop. No undocumented node quirks.
+**ai-flow** does one thing: define your pipeline in YAML, run one command. That's the
+whole interface. No UI to navigate, no parameters to guess, no hidden quirks.
 
 ## Install
 
@@ -100,7 +100,7 @@ different contract:
 |                  | n8n | ai-flow |
 |------------------|-----|---------|
 | UX target        | Person with mouse | AI with text editor |
-| Nodes            | 800+ | 4 (small, documented) |
+| Nodes            | 800+ | 7 (small, documented, extensible) |
 | Build cycle      | Create → UI edit → test → delete | Edit YAML → run |
 | Error messages   | `"The 'prompt' parameter is empty"` | `HTTPError 401 at translate` |
 | Expression syntax| `={{ }}` + `{{ }}` two systems | One: `{{key}}` |
