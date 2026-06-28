@@ -133,16 +133,13 @@ ai-flow is intentionally minimal:
 
 ## AI Agent Integration
 
-ai-flow comes with a **pi skill** so AI coding agents can build and run pipelines
-on your behalf — no need to write YAML by hand.
+ai-flow ships with an **agent skill** — a reference document that teaches your
+AI coding agent how to use ai-flow to build and run pipelines on your behalf.
+No need to write YAML by hand.
 
-```bash
-# Install the skill in pi
-pi skill install tiancaijb/ai-flow/pi-skill
-```
-
-Then tell pi: *"翻译 HN 上今天的 AI 新闻，存成 CSV"* — it reads the skill,
-writes the pipeline YAML, and runs it. That's it.
+Install it in your agent's skills directory (`pi-skill/SKILL.md`), then tell
+your agent: *"翻译 HN 上今天的 AI 新闻，存成 CSV"* — it reads the skill,
+writes the pipeline YAML, and runs it.
 
 ## License
 
