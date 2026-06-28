@@ -1,9 +1,20 @@
-# ai-flow demo: RSS → AI 翻译 → CSV
+# ai-flow demo: RSS → filter AI articles → translate → CSV
+# Uses the http + filter nodes added as plugins
 
 pipeline:
   - name: 获取RSS
     type: rss
-    url: https://hnrss.org/frontpage        # Hacker News 热门（改用 AI 相关：https://hnrss.org/frontpage?q=AI+OR+LLM+OR+GPT）
+    url: https://hnrss.org/frontpage
+
+  - name: 只保留AI相关
+    type: filter
+    field: title
+    contains: AI
+
+  # Alternative filter examples (comment in/out):
+  #   regex: "(?i)(ai|llm|gpt|openai|deepseek|claude)"
+  #   min_length: 20
+  #   starts_with: "Show HN"
 
   - name: AI翻译
     type: llm
@@ -11,12 +22,12 @@ pipeline:
     model: deepseek-chat
     api_key: "env:DEEPSEEK_KEY"
     prompt: |
-      将以下Hacker News标题翻译成中文，直接输出翻译结果：
+      将以下Hacker News标题翻译成中文，直接输出：
       标题：{{title}}
       内容：{{description}}
     temperature: 0.3
 
-  - name: 提取结果
+  - name: 提取字段
     type: mapper
     mapping:
       原标题: "{{title}}"

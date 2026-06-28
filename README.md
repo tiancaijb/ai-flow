@@ -59,12 +59,19 @@ DEEPSEEK_KEY=sk-xxx python3 ai_flow.py run pipeline.yaml
 
 ## Built-in Nodes
 
-| Node    | What it does |
-|---------|-------------|
-| `rss`   | Fetch & parse RSS/Atom feed |
-| `llm`   | Call OpenAI-compatible API (one call per upstream item) |
-| `mapper`| Rename, extract, or compose fields |
-| `csv`   | Write upstream items to a CSV file |
+```bash
+$ python3 ai_flow.py nodes
+  csv          Write upstream items to a CSV file.
+  delay        Delay / rate-limit between steps.
+  filter       Filter upstream items by a condition.
+  http         Generic HTTP request.
+  llm          LLM caller — one API call per upstream item.
+  mapper       Map upstream items through field templates.
+  rss          RSS/Atom feed fetcher.
+```
+
+Add new nodes by dropping a `.py` file in `nodes/` — auto-registered.
+Each node is ~30 lines, fully documented, no obscure parameters.
 
 ## Commands
 
@@ -98,15 +105,31 @@ different contract:
 | Error messages   | `"The 'prompt' parameter is empty"` | `HTTPError 401 at translate` |
 | Expression syntax| `={{ }}` + `{{ }}` two systems | One: `{{key}}` |
 
+## Adding Nodes (Plugin System)
+
+Create `nodes/my_node.py`:
+
+```python
+"""What this node does — shown in `ai-flow nodes`."""
+
+def run(cfg: dict, ctx: dict) -> list[dict]:
+    # cfg = YAML parameters for this node
+    # ctx = shared context + _items (upstream data)
+    return [{"result": "..."}]
+```
+
+That's it. No engine changes, no registration. Reload and it's live.
+
 ## Design
 
 ai-flow is intentionally minimal:
 
 - **No server, no daemon.** One Python process per run.
+- **Plugin-based nodes.** One `.py` file = one node type.
 - **Auto-retry.** Every node retries with exponential backoff (configurable).
 - **Per-item LLM.** Each upstream item gets its own LLM call automatically.
-- **DAG execution.** Each node passes output to the next. No manual wiring.
-- **Small surface.** 4 node types cover 80% of AI → LLM → storage pipelines.
+- **Linear DAG.** Each node passes output to the next. No manual wiring.
+- **AI-first.** Small surface, clear contracts, actionable errors.
 
 ## License
 

@@ -4,7 +4,7 @@ ai-flow — A workflow engine designed for AI, not humans.
 
 Design principles:
   - YAML in, results out. No drag-and-drop, no web UI.
-  - Few built-in nodes. Each has a clear contract and small parameter surface.
+  - Plugin-based nodes: add one .py file to nodes/ → auto-registered.
   - Template strings: `{{key}}` (resolved from current item + shared context).
   - LLM calls: one per upstream item (preserves per-item originals).
   - Auto-retry with exponential backoff, configurable per node.
@@ -14,22 +14,18 @@ Design principles:
 Synopsis:
   ai-flow run pipeline.yaml       # execute
   ai-flow dry-run pipeline.yaml   # show plan without calling APIs
-  ai-flow validate pipeline.yaml  # schema check only
+  ai-flow validate pipeline.yaml  # schema check
+  ai-flow nodes                   # list available nodes
 """
 
-import csv as csv_mod
-import json
+import importlib
 import os
 import sys
 import time
-import traceback
-from itertools import count
-from pathlib import Path
 from collections.abc import Mapping
-from typing import Any, Dict, List, Optional, Tuple, Union
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
-import feedparser
-import requests
 import yaml
 
 
@@ -74,138 +70,45 @@ def template(expr: str, ctx: dict) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Node runners — each is a pure function  (cfg, ctx) → items
+# Plugin loader: auto-discover nodes from nodes/*.py
 # ═══════════════════════════════════════════════════════════════════════════
 
-def node_rss(cfg: dict, ctx: dict) -> List[Dict[str, Any]]:
-    """Fetch an RSS/Atom feed. Returns one dict per entry."""
-    feed = feedparser.parse(cfg["url"])
-    return [
-        {
-            "title": e.get("title", ""),
-            "description": e.get("description", ""),
-            "summary": e.get("summary", ""),
-            "link": e.get("link", ""),
-            "published": e.get("published", ""),
-            "author": e.get("author", ""),
-        }
-        for e in feed.entries
-    ]
+def _load_nodes() -> Dict[str, Any]:
+    """Import every nodes/*.py and return {name: run_function}."""
+    nodes_dir = Path(__file__).resolve().parent / "nodes"
+    runners: Dict[str, Any] = {}
+    if not nodes_dir.is_dir():
+        return runners
+    for f in sorted(nodes_dir.glob("*.py")):
+        if f.name.startswith("_"):
+            continue
+        mod_name = f"nodes.{f.stem}"
+        try:
+            mod = importlib.import_module(mod_name)
+            if hasattr(mod, "run"):
+                desc = (mod.__doc__ or "").strip().split("\n")[0]
+                runners[f.stem] = mod.run
+        except Exception as e:
+            print(f"  ⚠ Failed to load node '{f.stem}': {e}", file=sys.stderr)
+    return runners
 
 
-def node_llm(cfg: dict, ctx: dict) -> List[Dict[str, Any]]:
-    """Call an OpenAI-compatible chat API. *ctx* must contain `prompt`
-    (the user message). Every other key in *ctx* is available as template
-    context for the prompt template.
-
-    Required cfg keys:
-      model        – model name (e.g. "deepseek-chat")
-      api_key      – API key string, or "env:VARNAME" to read from env
-    Optional:
-      base_url     – default "https://api.deepseek.com/v1"
-      temperature  – default 0.3
-      max_tokens   – default 4096
-    """
-    model = cfg.get("model", "deepseek-chat")
-    base_url = cfg.get("base_url", "https://api.deepseek.com/v1")
-    temperature = cfg.get("temperature", 0.3)
-    max_tokens = cfg.get("max_tokens", 4096)
-
-    api_key = cfg["api_key"]
-    if api_key.startswith("env:"):
-        api_key = os.environ.get(api_key[4:], "")
-
-    # Render prompt template against *ctx*
-    content = template(cfg.get("prompt", ""), ctx)
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": content}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    resp = requests.post(f"{base_url}/chat/completions", json=payload, headers=headers, timeout=180)
-    resp.raise_for_status()
-    data = resp.json()
-    response_text = data["choices"][0]["message"]["content"]
-
-    return [{**ctx, "_output": response_text, "_usage": data.get("usage", {})}]
-
-
-def node_mapper(cfg: dict, ctx: dict) -> List[Dict[str, Any]]:
-    """Map each upstream item through a set of field mappings.
-    Useful for renaming, extracting, or composing fields.
-
-    Required: none (operates on upstream items)
-    """
-    # The context contains `_items` (list of upstream item dicts)
-    items = ctx.get("_items", [])
-    mapping = cfg.get("mapping", {})
-    out = []
-    for item in items:
-        item_ctx = {**item, **ctx}
-        mapped = {}
-        for dst, src_tpl in mapping.items():
-            mapped[dst] = template(src_tpl, item_ctx)
-        out.append(mapped)
-    return out
-
-
-def node_csv(cfg: dict, ctx: dict) -> List[Dict[str, Any]]:
-    """Write upstream items to a CSV file."""
-    items = ctx.get("_items", [])
-    columns = cfg.get("columns", {})
-    path = template(cfg.get("file", "/tmp/ai-flow.csv"), ctx)
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-
-    rows = []
-    for item in items:
-        item_ctx = {**item, **ctx}
-        rows.append({col: template(tpl, item_ctx) for col, tpl in columns.items()})
-
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        if rows:
-            w = csv_mod.DictWriter(f, fieldnames=list(columns.keys()))
-            w.writeheader()
-            w.writerows(rows)
-
-    return [{"file": path, "rows": len(rows)}]
-
-
-# ── Registry ────────────────────────────────────────────────────────────────
-
-RUNNERS = {
-    "rss": node_rss,
-    "llm": node_llm,
-    "mapper": node_mapper,
-    "csv": node_csv,
-}
+RUNNERS = _load_nodes()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Engine
 # ═══════════════════════════════════════════════════════════════════════════
 
-class PipelineError(Exception):
-    """An error in pipeline definition or execution."""
-    def __init__(self, node: str, msg: str):
-        self.node = node                                    # type: str
-        self.msg = msg                                      # type: str
-
-
 def _run_node(
     name: str,
     ntype: str,
     cfg: dict,
     retry: int,
-    upstream_items: List[Dict[str, Any]],
+    upstream_items: List[dict],
     shared_ctx: dict,
     dry_run: bool,
-) -> Tuple[bool, List[Dict[str, Any]], str, int]:
+) -> Tuple[bool, List[dict], str, int]:
     """Execute one node (with retry). Returns (ok, items, error, attempts)."""
     runner = RUNNERS.get(ntype)
 
@@ -213,19 +116,22 @@ def _run_node(
         return True, [{"_dry_run": True, "type": ntype, "config": cfg}], "", 0
 
     if not runner:
-        return False, [], f"Unknown node type '{ntype}'. Available: {list(RUNNERS.keys())}", 0
+        return False, [], (
+            f"Unknown node type '{ntype}'. Available: {list(RUNNERS.keys())}. "
+            f"Add a {ntype}.py to the nodes/ directory with a run(cfg, ctx) function."
+        ), 0
 
     max_attempts = retry + 1
     last_err = ""
+    bulk_nodes = {"llm"}  # nodes that need per-item dispatch
 
     for attempt in range(1, max_attempts + 1):
         try:
-            t0 = time.time()
             ctx = {**shared_ctx, "_items": upstream_items}
 
-            if ntype == "llm":
-                # One LLM call per upstream item
-                out: List[Dict[str, Any]] = []
+            if ntype in bulk_nodes:
+                # One call per upstream item
+                out: List[dict] = []
                 for item in upstream_items:
                     item_ctx = {**ctx, **item}
                     result = runner(cfg=cfg, ctx=item_ctx)
@@ -253,7 +159,7 @@ def execute(pipeline: dict, dry_run: bool = False) -> List[dict]:
     steps = pipeline.get("pipeline", [])
     results: List[dict] = []
     shared_ctx: Dict[str, Any] = {}
-    last_output: List[Dict[str, Any]] = []
+    last_output: List[dict] = []
 
     for step in steps:
         name = step.get("name", f"step_{len(results)}")
@@ -268,11 +174,8 @@ def execute(pipeline: dict, dry_run: bool = False) -> List[dict]:
             shared_ctx=shared_ctx, dry_run=dry_run,
         )
 
-        result = {
-            "node": name, "ok": ok,
-            "items": items, "error": err,
-            "attempts": attempts,
-        }
+        result = {"node": name, "ok": ok, "items": items,
+                  "error": err, "attempts": attempts}
         results.append(result)
 
         if not ok:
@@ -299,25 +202,43 @@ def validate(pipeline: dict) -> List[str]:
         if "type" not in step:
             errors.append(f"{name}: missing 'type'")
         elif step["type"] not in RUNNERS:
-            errors.append(f"{name}: unknown type '{step['type']}' — "
-                          f"available: {list(RUNNERS.keys())}")
+            errors.append(
+                f"{name}: unknown type '{step['type']}'. "
+                f"Available: {list(RUNNERS.keys())}"
+            )
     return errors
 
 
-def _fmt_error(node: str, err: str) -> str:
-    """Format an error so AI can act on it."""
-    # Truncate very long error messages
-    if len(err) > 500:
-        err = err[:500] + "…"
-    return f"❌ {node}: {err}"
+def _describe_node(name: str) -> str:
+    """Return the first paragraph of a node's docstring."""
+    mod = importlib.import_module(f"nodes.{name}")
+    doc = (mod.__doc__ or "No description.").strip()
+    # Take everything up to the first blank line or YAML: block
+    lines = []
+    for line in doc.split("\n"):
+        if not line.strip():
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
 
 
 def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__.strip())
+        return 0
+
+    cmd = sys.argv[1]
+
+    if cmd == "nodes":
+        print("Available nodes:\n")
+        for name in sorted(RUNNERS):
+            print(f"  {name:<12} {_describe_node(name)}")
+        return 0
+
     if len(sys.argv) < 3:
         print(__doc__.strip())
         return 1
 
-    cmd = sys.argv[1]
     path = Path(sys.argv[2])
 
     if not path.exists():
@@ -365,7 +286,7 @@ def main() -> int:
         print(f"\n{label}  ({elapsed:.0f}ms)")
         return 0 if ok else 1
 
-    print(f"Unknown command: {cmd}. Use run, validate, or dry-run.", file=sys.stderr)
+    print(f"Unknown command: {cmd}. Use run, validate, dry-run, or nodes.", file=sys.stderr)
     return 1
 
 
