@@ -137,7 +137,7 @@ ai-flow ships with an **agent skill** — a reference document that teaches your
 AI coding agent how to use ai-flow to build and run pipelines on your behalf.
 No need to write YAML by hand.
 
-Install it in your agent's skills directory (`pi-skill/SKILL.md`), then tell
+Install it in your agent's skills directory (`ai-flow-skill/SKILL.md`), then tell
 your agent: *"翻译 HN 上今天的 AI 新闻，存成 CSV"* — it reads the skill,
 writes the pipeline YAML, and runs it.
 
