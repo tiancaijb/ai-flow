@@ -131,6 +131,19 @@ ai-flow is intentionally minimal:
 - **Linear DAG.** Each node passes output to the next. No manual wiring.
 - **AI-first.** Small surface, clear contracts, actionable errors.
 
+## AI Agent Integration
+
+ai-flow comes with a **pi skill** so AI coding agents can build and run pipelines
+on your behalf — no need to write YAML by hand.
+
+```bash
+# Install the skill in pi
+pi skill install tiancaijb/ai-flow/pi-skill
+```
+
+Then tell pi: *"翻译 HN 上今天的 AI 新闻，存成 CSV"* — it reads the skill,
+writes the pipeline YAML, and runs it. That's it.
+
 ## License
 
 MIT
