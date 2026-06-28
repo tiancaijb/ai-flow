@@ -1,0 +1,32 @@
+# ai-flow demo: RSS → AI 翻译 → CSV
+
+pipeline:
+  - name: 获取RSS
+    type: rss
+    url: https://hnrss.org/frontpage        # Hacker News 热门（改用 AI 相关：https://hnrss.org/frontpage?q=AI+OR+LLM+OR+GPT）
+
+  - name: AI翻译
+    type: llm
+    retry: 4
+    model: deepseek-chat
+    api_key: "env:DEEPSEEK_KEY"
+    prompt: |
+      将以下Hacker News标题翻译成中文，直接输出翻译结果：
+      标题：{{title}}
+      内容：{{description}}
+    temperature: 0.3
+
+  - name: 提取结果
+    type: mapper
+    mapping:
+      原标题: "{{title}}"
+      链接: "{{link}}"
+      翻译: "{{_output}}"
+
+  - name: 保存CSV
+    type: csv
+    file: "{{env.HOME}}/ai_news.csv"
+    columns:
+      原标题: "{{原标题}}"
+      链接: "{{链接}}"
+      AI翻译结果: "{{翻译}}"
