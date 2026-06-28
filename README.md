@@ -1,75 +1,113 @@
 # ai-flow
 
-AI-friendly workflow engine. Define pipelines in YAML with a small set of
-well-documented nodes. One command to run. No web UI, no drag-and-drop.
+> A workflow engine designed for AI, not humans.
 
-## Why?
+Most workflow engines (n8n, Zapier, Temporal) are built for humans: drag-and-drop
+editors, rich parameter panels, 800+ integrations. They're great for people. But
+when an AI agent tries to build a workflow on top of them, the debugging loop is
+painful: guess parameters → create workflow → run → decode error → delete → retry.
 
-Existing workflow tools (n8n, Zapier, etc.) are designed for humans:
-visual editors, rich parameter panels, 800+ nodes. When an AI tries to
-build workflows on top of them, the debugging loop is painful: guess
-parameters → create workflow → run → interpret error → delete → retry.
-
-**ai-flow** is designed from the ground up for AI-driven workflow
-generation: YAML in, results out.
+**ai-flow** does only what's needed: define your pipeline in YAML, run one command.
+No web UI. No drag-and-drop. No undocumented node quirks.
 
 ## Install
 
 ```bash
+git clone https://github.com/tiancaijb/ai-flow.git
+cd ai-flow
 pip install -r requirements.txt
 ```
 
-## Usage
-
-```bash
-# Validate pipeline definition
-python3 ai_flow.py validate rss_translate.yaml
-
-# Dry-run (show plan without calling APIs)
-python3 ai_flow.py dry-run rss_translate.yaml
-
-# Execute
-DEEPSEEK_KEY=sk-xxx python3 ai_flow.py run rss_translate.yaml
-```
-
-## Pipeline Format
+## Quick Start
 
 ```yaml
+# pipeline.yaml
 pipeline:
-  - name: step1
+  - name: fetch_feed
     type: rss
-    url: https://example.com/feed.xml
+    url: https://hnrss.org/frontpage
 
-  - name: step2
+  - name: translate
     type: llm
-    retry: 3           # max retries (default 2)
+    retry: 4
     model: deepseek-chat
-    api_key: env:MY_KEY  # read from env var $MY_KEY
-    prompt: |           # template: {{field}} from upstream items
-      翻译：{{title}}
+    api_key: "env:DEEPSEEK_KEY"
+    prompt: "Translate to Chinese: {{title}}"
+    temperature: 0.3
 
-  - name: step3
+  - name: save
     type: csv
-    file: ~/output.csv
+    file: "{{env.HOME}}/translated.csv"
     columns:
-      Title: "{{title}}"
+      Original: "{{title}}"
       Translation: "{{_output}}"
+```
+
+```bash
+DEEPSEEK_KEY=sk-xxx python3 ai_flow.py run pipeline.yaml
+```
+
+```
+▶ pipeline.yaml
+
+  ✅ fetch_feed → 20 item(s)
+  ✅ translate → 20 item(s)
+  ✅ save → 1 item(s)
+
+✅ Success  (17s)
 ```
 
 ## Built-in Nodes
 
-| type     | What it does                                              |
-|----------|----------------------------------------------------------|
-| `rss`    | Fetch & parse RSS/Atom feed                              |
-| `llm`    | Call OpenAI-compatible API (one call per upstream item)  |
-| `mapper` | Rename, extract, or compose fields                       |
-| `csv`    | Write upstream items to a CSV file                       |
+| Node    | What it does |
+|---------|-------------|
+| `rss`   | Fetch & parse RSS/Atom feed |
+| `llm`   | Call OpenAI-compatible API (one call per upstream item) |
+| `mapper`| Rename, extract, or compose fields |
+| `csv`   | Write upstream items to a CSV file |
 
-## Key Design Choices
+## Commands
 
-- **No configuration GUIs.** All node config is in the YAML.
-- **Small node surface.**  Built-in nodes only. Extend via code, not plugins.
-- **{{field}} templates.** Simple, predictable — no custom expression language.
+```bash
+python3 ai_flow.py run pipeline.yaml       # execute
+python3 ai_flow.py dry-run pipeline.yaml   # preview without API calls
+python3 ai_flow.py validate pipeline.yaml  # schema check
+```
+
+## Template Syntax
+
+`{{key.path}}` resolves against the current item context. Special prefixes:
+
+```yaml
+{{title}}          # upstream item field
+{{env.HOME}}       # environment variable
+{{_output}}        # LLM response text (from llm node)
+{{_usage}}         # token usage stats (from llm node)
+```
+
+## Why Not n8n / Temporal / Prefect?
+
+These tools are excellent — for humans. But AI agents writing workflows need a
+different contract:
+
+|                  | n8n | ai-flow |
+|------------------|-----|---------|
+| UX target        | Person with mouse | AI with text editor |
+| Nodes            | 800+ | 4 (small, documented) |
+| Build cycle      | Create → UI edit → test → delete | Edit YAML → run |
+| Error messages   | `"The 'prompt' parameter is empty"` | `HTTPError 401 at translate` |
+| Expression syntax| `={{ }}` + `{{ }}` two systems | One: `{{key}}` |
+
+## Design
+
+ai-flow is intentionally minimal:
+
+- **No server, no daemon.** One Python process per run.
+- **Auto-retry.** Every node retries with exponential backoff (configurable).
 - **Per-item LLM.** Each upstream item gets its own LLM call automatically.
-- **Auto-retry.** Every node retries with exponential backoff.
-- **Actionable errors.** Error messages tell you what to fix, not a stack trace.
+- **DAG execution.** Each node passes output to the next. No manual wiring.
+- **Small surface.** 4 node types cover 80% of AI → LLM → storage pipelines.
+
+## License
+
+MIT
